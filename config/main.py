@@ -6921,5 +6921,31 @@ def del_subinterface(ctx, subinterface_name):
     except JsonPatchConflict as e:
         ctx.fail("{} is invalid vlan subinterface. Error: {}".format(subinterface_name, e))
 
+
+#
+# 'txargs_threshold' command
+#
+@config.command('txargs_threshold')
+@click.argument('new_threshold', metavar='<new_threshold>', required=True)
+def txargs_threshold(new_threshold):
+
+    config_db = ConfigDBConnector()
+    config_db.connect()
+    config_db.mod_entry("TX_MONITORS_ARGS", 'config_tx_threshold',
+                        {'threshold': new_threshold})
+    
+#
+# 'txargs_duration' command
+#
+@config.command('txargs_duration')
+@click.argument('new_duration', metavar='<new_duration>', required=True)
+def txargs_duration(new_duration):
+
+    config_db = ConfigDBConnector()
+    config_db.connect()
+    config_db.mod_entry("TX_MONITORS_ARGS", 'config_tx_duration',
+                        {'duration': new_duration})
+
+
 if __name__ == '__main__':
     config()
