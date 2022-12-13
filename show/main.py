@@ -2028,6 +2028,52 @@ def peer(db, peer_ip):
 
     click.echo(tabulate(bfd_body, bfd_headers))
 
+#
+# 'tx_monitor_interface' group ("show tx_monitor_interface ...")
+#
+
+@cli.group(name='tx_monitor_interface', cls=clicommon.AliasedGroup)
+def tx_monitor_interface():
+    """Show management interface parameters"""
+    pass
+
+# 'tx_fields' subcommand ("show tx_monitor_interface tx_fields")
+@tx_monitor_interface.command()
+def data ():
+    """Show data configured for tx_monitor interface"""
+
+    config_db = ConfigDBConnector()
+    config_db.connect()
+
+    # Fetching data from config_db for TX_ERROR_MONITOR
+    tx_monitor_data = config_db.get_table('TX_ERROR_MONITOR')
+    for key in natsorted(list(tx_monitor_data.keys())):
+        click.echo("{0}".format(tx_monitor_data[key]))
+
+
+#
+# 'txstate' group ("show txstate ...")
+#
+@cli.group(cls=clicommon.AliasedGroup)
+def txstate():
+    """Show details of the txstate sessions"""
+    pass
+
+# 'summary' subcommand ("show txstate summary")
+@txstate.command()
+@clicommon.pass_db
+def summary(db):
+    """Show txstate session information"""
+    txstate_keys = db.db.get_all(db.db.STATE_DB, "TX_ERROR_TABLE")
+    txstate_headers = ["Interface Name", "Tx State"]
+    txstate_body = []
+    if txstate_keys is not None:
+        for key in sorted(txstate_keys.keys()):
+            txstate_body.append([key, txstate_keys[key]])
+    else:
+        click.echo("EMPTY DATA")
+    click.echo(tabulate(txstate_body, txstate_headers, tablefmt="grid"))
+
 
 # Load plugins and register them
 helper = util_base.UtilHelper()
