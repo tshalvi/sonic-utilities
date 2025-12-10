@@ -1387,6 +1387,129 @@ save_symlink() {
 }
 
 ###############################################################################
+# Derive mlxlink panel identifier from alias/index info
+# Globals:
+#  None
+# Arguments:
+#  alias: Cleaned alias string (lowercase, no quotes) from PORT table
+#  index: Cleaned index value (digits only) from PORT table
+# Returns:
+#  Panel port identifier understood by mlxlink (e.g. 23, 23/2)
+###############################################################################
+derive_mlxlink_panel_port() {
+    local alias="$1"
+    local index="$2"
+    local panel=""
+    local suffix=""
+    local ASCII_LOWERCASE_OFFSET=96
+
+    if [[ -n "$alias" && "$alias" =~ ([0-9]+)([a-z])$ ]]; then
+        panel="${BASH_REMATCH[1]}"
+        suffix="${BASH_REMATCH[2]}"
+        local ascii_val
+        ascii_val=$(printf '%d' "'$suffix")
+        local ordinal=$((ascii_val - ASCII_LOWERCASE_OFFSET))
+        if [ "$ordinal" -le 1 ]; then
+            echo "$panel"
+        else
+            echo "${panel}/${ordinal}"
+        fi
+        return
+    fi
+
+    if [[ -n "$alias" && "$alias" =~ ([0-9]+)$ ]]; then
+        echo "${BASH_REMATCH[1]}"
+        return
+    fi
+
+    if [[ -n "$index" && "$index" =~ ^[0-9]+$ ]]; then
+        echo "$index"
+        return
+    fi
+
+    echo ""
+}
+
+###############################################################################
+# Collect mlxlink status for each logical port
+# Globals:
+#  LOGDIR
+#  MKDIR
+#  V
+#  NOOP
+#  TIMEOUT_MIN
+# Arguments:
+#  None
+# Returns:
+#  None
+###############################################################################
+collect_mlxlink_status() {
+    trap 'handle_error $? $LINENO' ERR
+    local output_file="${LOGDIR}/mlxlink.status"
+    local timeout_cmd="timeout --foreground ${TIMEOUT_MIN}m"
+    local ports=""
+    local mst_device=""
+
+    if $NOOP; then
+        echo "mlxlink status collection skipped in noop mode" > "$output_file"
+        return
+    fi
+
+    if ! command -v mlxlink &>/dev/null; then
+        echo "mlxlink command not found on the system" > "$output_file"
+        return
+    fi
+
+    if command -v mst &>/dev/null; then
+        mst_device=$(mst status 2>/dev/null | awk '/pciconf0/ {print $1; exit}')
+    fi
+
+    if [ -z "$mst_device" ]; then
+        echo "Unable to detect MST device" > "$output_file"
+        return
+    fi
+
+    ports=$(sonic-cfggen -d -v "PORT.keys()|join(' ')" 2>/dev/null || echo "")
+    if [ -z "$ports" ]; then
+        echo "No logical ports were found in CONFIG_DB" > "$output_file"
+        return
+    fi
+
+    : > "$output_file"
+    for port in $ports; do
+        local alias=""
+        local index=""
+        local mlx_port=""
+
+        alias=$(sonic-cfggen -d -v "PORT['$port']['alias']" 2>/dev/null || echo "")
+        alias=${alias//$'\n'/}
+        alias="${alias//[\"\']/}"
+        alias="${alias,,}"
+
+        index=$(sonic-cfggen -d -v "PORT['$port']['index']" 2>/dev/null || echo "")
+        index=${index//$'\n'/}
+        index=${index//\'/}
+        index=${index//\"/}
+
+        mlx_port=$(derive_mlxlink_panel_port "$alias" "$index")
+        if [ -z "$mlx_port" ]; then
+            echo "Skipping ${port}: unable to derive panel port identifier" >> "$output_file"
+            echo >> "$output_file"
+            continue
+        fi
+
+        echo "===== ${port} (mlxlink port ${mlx_port}) =====" >> "$output_file"
+
+        if ! NO_COLOR=1 TERM=dumb ${timeout_cmd} mlxlink -d "$mst_device" -p "$mlx_port" 2>&1 \
+            | sed -r 's/\x1B\[[0-9;]*[[:alpha:]]//g' >> "$output_file"; then
+            echo "mlxlink invocation failed for ${port}" >> "$output_file"
+        fi
+
+        echo >> "$output_file"
+    done
+}
+
+###############################################################################
 # Collect Mellanox specific information
 # Globals:
 #  CMD_PREFIX
@@ -1465,6 +1588,7 @@ collect_mellanox() {
     fi
 
     save_cmd "get_component_versions.py" "component_versions"
+    collect_mlxlink_status
     if [[ $is_smartswitch == "True" ]]; then
         save_cmd "dpuctl dpu-status" "dpu_status"
     fi
