@@ -1403,12 +1403,14 @@ derive_mlxlink_panel_port() {
     local suffix=""
     local ASCII_LOWERCASE_OFFSET=96
 
+    # Case 1: Alias contains panel number + lane letter (e.g., "17a", "17b").
     if [[ -n "$alias" && "$alias" =~ ([0-9]+)([a-z])$ ]]; then
         panel="${BASH_REMATCH[1]}"
         suffix="${BASH_REMATCH[2]}"
         local ascii_val
         ascii_val=$(printf '%d' "'$suffix")
-        local ordinal=$((ascii_val - ASCII_LOWERCASE_OFFSET))
+        local ordinal=$((ascii_val - ASCII_LOWERCASE_OFFSET)) # Convert lane letter ('a','b','c',...) → ordinal number (1,2,3,...)
+        # mlxlink expects: lane 1 → "panel", lane > 1 → "panel/lane"
         if [ "$ordinal" -le 1 ]; then
             echo "$panel"
         else
@@ -1417,11 +1419,13 @@ derive_mlxlink_panel_port() {
         return
     fi
 
+    # Case 2: Alias contains only digits (e.g., "17").
     if [[ -n "$alias" && "$alias" =~ ([0-9]+)$ ]]; then
         echo "${BASH_REMATCH[1]}"
         return
     fi
 
+    # Case 3: Alias is empty or malformed.
     if [[ -n "$index" && "$index" =~ ^[0-9]+$ ]]; then
         echo "$index"
         return
@@ -1469,7 +1473,13 @@ collect_mlxlink_status() {
         return
     fi
 
-    ports=$(sonic-cfggen -d -v "PORT.keys()|join(' ')" 2>/dev/null || echo "")
+    # Retrieve logical ports and sort them numerically by their index
+    ports=$(sonic-cfggen -d -v "PORT.keys()|join(' ')" 2>/dev/null \
+    | tr ' ' '\n' \
+    | sed 's/Ethernet//' \
+    | sort -n \
+    | sed 's/^/Ethernet/' \
+    | tr '\n' ' ')
     if [ -z "$ports" ]; then
         echo "No logical ports were found in CONFIG_DB" > "$output_file"
         return
